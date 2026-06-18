@@ -1,0 +1,829 @@
+<!-- SPDX-License-Identifier: MIT -->
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meal Planner · Shopping List</title>
+<link rel="icon" href="favicon.ico">
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     MEAL PLANNER
+     Standalone static web app. Drop this file + catalog.json on any web
+     server alongside your recipe HTML files (schweinefilet-honig-rosmarin
+     .html format, each with an embedded #recipe-data JSON block).
+     Select recipes, pick servings, export the combined shopping list as
+     text, PDF, or straight into Apple Reminders. Design matches the
+     recipe pages.
+     ═══════════════════════════════════════════════════════════════════ -->
+<style>
+  :root {
+    --bg:           #faf8f5;
+    --surface:      #ffffff;
+    --surface2:     #f4f1ec;
+    --accent:       #8b6f47;
+    --accent-light: #c9a96e;
+    --text:         #2c2416;
+    --text-muted:   #7a6a55;
+    --border:       #e8e0d4;
+    --tag-bg:       #ede9e1;
+    --radius:       12px;
+    --shadow:       0 2px 12px rgba(44,36,22,0.08);
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: Georgia, serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+  }
+
+  /* ── Language bar ── */
+  .lang-bar {
+    position: sticky; top: 0; z-index: 100;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center;
+    padding: 0.55rem 1.5rem; gap: 0.5rem;
+  }
+  .lang-bar .brand {
+    font-weight: 700; color: var(--accent); margin-right: auto;
+    font-size: 0.95rem; letter-spacing: 0.02em;
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .lang-btn {
+    background: none;
+    border: 1.5px solid var(--border);
+    border-radius: 20px;
+    padding: 0.28rem 0.95rem;
+    font-size: 0.78rem; font-weight: 700; letter-spacing: 0.07em;
+    cursor: pointer; color: var(--text-muted);
+    transition: background 0.18s, color 0.18s, border-color 0.18s;
+  }
+  .lang-btn.active, .lang-btn:hover {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+  }
+
+  /* ── Page header ── */
+  .page-header {
+    background: var(--surface);
+    padding: 1.6rem 1.5rem 1.2rem;
+    border-bottom: 1px solid var(--border);
+    text-align: center;
+  }
+  .page-header h1 {
+    font-size: clamp(1.4rem, 3vw, 2.1rem);
+    font-weight: 700; line-height: 1.2; margin-bottom: 0.3rem;
+  }
+  .page-header p { font-size: 0.95rem; color: var(--text-muted); font-style: italic; }
+
+  /* ── Layout ── */
+  .layout {
+    max-width: 1180px; margin: 0 auto;
+    padding: 1.6rem 1.5rem 3rem;
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    gap: 1.8rem;
+    align-items: start;
+  }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+
+  h2 {
+    font-size: 1.15rem; font-weight: 700; color: var(--accent);
+    margin-bottom: 1rem; padding-bottom: 0.35rem;
+    border-bottom: 2px solid var(--border); letter-spacing: 0.02em;
+  }
+
+  /* ── Toolbar ── */
+  .toolbar { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 1.2rem; align-items: center; }
+  .search {
+    flex: 1 1 200px; min-width: 160px;
+    background: var(--surface); border: 1.5px solid var(--border);
+    border-radius: 8px; padding: 0.5rem 0.8rem;
+    font-family: inherit; font-size: 0.9rem; color: var(--text);
+  }
+  .search:focus { outline: none; border-color: var(--accent-light); }
+  .chip {
+    background: var(--surface); border: 1.5px solid var(--border);
+    border-radius: 20px; padding: 0.25rem 0.8rem;
+    font-size: 0.75rem; color: var(--text-muted); cursor: pointer;
+    transition: background 0.18s, color 0.18s, border-color 0.18s;
+  }
+  .chip.active, .chip:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .tag-toggle { white-space: nowrap; }
+  .tag-filters { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1rem; }
+  .tag-filters[hidden] { display: none; }
+  .toolbar-right { display: flex; align-items: center; gap: 0.9rem; margin-left: auto; flex-wrap: wrap; }
+  .default-serv { display: flex; align-items: center; gap: 0.35rem; }
+  .default-serv label { font-size: 0.74rem; color: var(--text-muted); }
+  .view-toggle { display: flex; border: 1.5px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .view-toggle button {
+    background: var(--surface); border: none; padding: 0.32rem 0.6rem; cursor: pointer;
+    color: var(--text-muted); font-size: 1rem; line-height: 1; font-family: inherit;
+    transition: background 0.18s, color 0.18s;
+  }
+  .view-toggle button.active { background: var(--accent); color: #fff; }
+
+  /* ── Recipe cards ── */
+  .catalog { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; }
+  .card {
+    position: relative;
+    background: var(--surface); border: 1.5px solid var(--border);
+    border-radius: var(--radius); overflow: hidden;
+    display: flex; flex-direction: column;
+    transition: border-color 0.18s, box-shadow 0.18s;
+  }
+  .card.selected { border-color: var(--accent); box-shadow: var(--shadow); }
+  .fav-btn {
+    position: absolute; top: 0.5rem; right: 0.5rem; z-index: 2;
+    width: 2rem; height: 2rem; border: none; border-radius: 50%;
+    background: rgba(255,255,255,0.92); box-shadow: 0 1px 4px rgba(44,36,22,0.25);
+    cursor: pointer; font-size: 1.15rem; line-height: 1; color: var(--text-muted);
+    display: flex; align-items: center; justify-content: center;
+    transition: transform 0.12s, color 0.18s;
+  }
+  .fav-btn:hover { transform: scale(1.14); }
+  .fav-btn.on { color: var(--accent-light); }
+  /* group headings (Favorites / All recipes) span the full grid width */
+  .group-head {
+    grid-column: 1 / -1;
+    font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--accent); font-weight: 700;
+    padding: 0.2rem 0 0.3rem; border-bottom: 1px solid var(--border);
+  }
+  .group-head:not(:first-child) { margin-top: 0.6rem; }
+  .group-head .star { color: var(--accent-light); }
+  .card .thumb { width: 100%; height: 130px; object-fit: cover; display: block; background: var(--surface2); }
+  .card .body { padding: 0.85rem 1.1rem 0.9rem; display: flex; flex-direction: column; gap: 0.5rem; flex: 1; }
+  .card .info { display: flex; flex-direction: column; gap: 0.5rem; flex: 1; }
+  .card h3 { font-size: 1.02rem; line-height: 1.3; }
+  .card h3 a { color: var(--text); text-decoration: none; }
+  .card h3 a:hover { color: var(--accent); text-decoration: underline; }
+  .card .subtitle { font-size: 0.82rem; color: var(--text-muted); font-style: italic; }
+  .card-meta { display: flex; flex-wrap: wrap; gap: 0.35rem 0.5rem; }
+  .meta-tag {
+    background: var(--tag-bg); border-radius: 20px; padding: 0.2rem 0.7rem;
+    font-size: 0.72rem; color: var(--text-muted);
+    display: flex; align-items: center; gap: 0.3rem;
+  }
+  .card-foot { margin-top: auto; padding-top: 0.6rem; display: flex; flex-direction: column; gap: 0.55rem; }
+  .servings-row { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+  .servings-row label { font-size: 0.74rem; color: var(--text-muted); }
+  .serving-btn {
+    background: var(--surface); border: 1.5px solid var(--border); border-radius: 8px;
+    padding: 0.2rem 0.6rem; font-size: 0.8rem; color: var(--text-muted); cursor: pointer; font-family: inherit;
+    transition: background 0.18s, color 0.18s, border-color 0.18s;
+  }
+  .serving-btn.active, .serving-btn:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .add-btn {
+    background: var(--accent); color: #fff; border: 1.5px solid var(--accent);
+    border-radius: 8px; padding: 0.45rem 0.9rem; font-family: inherit;
+    font-size: 0.82rem; font-weight: 700; cursor: pointer; white-space: nowrap;
+    transition: background 0.18s, color 0.18s;
+  }
+  .card.selected .add-btn { background: var(--surface); color: var(--accent); }
+
+  /* ── List view ── */
+  .catalog.list { grid-template-columns: 1fr; gap: 0.7rem; }
+  .catalog.list .card { flex-direction: row; }
+  .catalog.list .thumb { width: 120px; height: auto; min-height: 100%; align-self: stretch; flex-shrink: 0; }
+  .catalog.list .body { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 0.5rem 1.4rem; padding: 0.7rem 1.1rem; }
+  .catalog.list .info { flex: 1 1 220px; gap: 0.3rem; }
+  .catalog.list .card-foot { margin-top: 0; padding-top: 0; flex-direction: row; align-items: center; gap: 1rem; flex: 0 0 auto; }
+  @media (max-width: 520px) { .catalog.list .thumb { display: none; } }
+
+  /* ── Shopping list panel ── */
+  .panel {
+    background: var(--surface); border: 1.5px solid var(--border);
+    border-radius: var(--radius); padding: 1.1rem 1.2rem 1.3rem;
+    position: sticky; top: 4rem;
+  }
+  @media (max-width: 900px) { .panel { position: static; } }
+  .panel .count { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.9rem; }
+  .empty { font-size: 0.88rem; color: var(--text-muted); font-style: italic; padding: 1rem 0; }
+  .ing-line { display: flex; gap: 0.55rem; font-size: 0.86rem; padding: 0.16rem 0; align-items: baseline; }
+  .ing-line .amt { font-weight: 700; color: var(--accent); flex-shrink: 0; min-width: 66px; }
+  .ing-line .nm { color: var(--text); }
+  .ing-line.totaste .amt { color: var(--text-muted); font-weight: 400; font-style: italic; }
+  .pantry-block { margin-top: 0.9rem; padding-top: 0.7rem; border-top: 1px solid var(--border); }
+  .pantry-block h4 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--accent); font-weight: 700; margin-bottom: 0.3rem; }
+  .selected-recipes { margin-bottom: 0.9rem; padding-bottom: 0.7rem; border-bottom: 1px solid var(--border); }
+  .selected-recipes h4 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--accent); font-weight: 700; margin-bottom: 0.35rem; }
+  .selected-recipes ul { list-style: none; margin: 0; padding: 0; }
+  .selected-recipes li { font-size: 0.83rem; padding: 0.1rem 0; }
+  .selected-recipes a { color: var(--text); text-decoration: none; }
+  .selected-recipes a:hover { color: var(--accent); text-decoration: underline; }
+  .selected-recipes .srv { color: var(--text-muted); font-size: 0.78rem; margin-left: 0.3em; }
+  .pantry-line { font-size: 0.8rem; color: var(--text-muted); font-style: italic; }
+
+  .export-row { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 1.1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+  .ex-btn {
+    flex: 1 1 calc(50% - 0.45rem);
+    background: var(--surface); border: 1.5px solid var(--border); border-radius: 8px;
+    padding: 0.5rem 0.4rem; font-family: inherit; font-size: 0.78rem; font-weight: 700;
+    color: var(--accent); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.35rem;
+    transition: background 0.18s, color 0.18s, border-color 0.18s;
+  }
+  .ex-btn:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .clear-btn {
+    width: 100%; margin-top: 0.5rem; background: none; border: none;
+    color: var(--text-muted); font-family: inherit; font-size: 0.78rem; cursor: pointer; text-decoration: underline;
+  }
+  details.help { margin-top: 0.9rem; font-size: 0.78rem; color: var(--text-muted); }
+  details.help summary { cursor: pointer; color: var(--accent); font-weight: 700; }
+  details.help ol { margin: 0.5rem 0 0 1.1rem; line-height: 1.6; }
+  details.help .help-figure { margin: 0.7rem 0 0; }
+  details.help .help-figure img { width: 100%; max-width: 360px; display: block; border: 1px solid var(--border); border-radius: 8px; cursor: zoom-in; }
+  .lightbox {
+    position: fixed; inset: 0; z-index: 1000; display: none;
+    align-items: center; justify-content: center; padding: 2rem;
+    background: rgba(0,0,0,0.85); cursor: zoom-out;
+  }
+  .lightbox.open { display: flex; }
+  .lightbox img { max-width: 100%; max-height: 100%; border-radius: 8px; box-shadow: 0 8px 40px rgba(0,0,0,0.5); }
+  details.help figcaption { margin-top: 0.3rem; font-size: 0.72rem; font-style: italic; color: var(--text-muted); }
+  details.help input {
+    width: 100%; margin-top: 0.5rem; padding: 0.35rem 0.5rem; font-family: inherit; font-size: 0.8rem;
+    border: 1.5px solid var(--border); border-radius: 6px;
+  }
+  .toast {
+    position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%) translateY(2rem);
+    background: var(--text); color: var(--bg); padding: 0.6rem 1.2rem; border-radius: 8px;
+    font-size: 0.85rem; opacity: 0; pointer-events: none; transition: opacity 0.25s, transform 0.25s; z-index: 200;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  footer { text-align: center; padding: 1.5rem; font-size: 0.75rem; color: var(--text-muted); border-top: 1px solid var(--border); }
+
+  /* ── Print (PDF export) ── */
+  #print-area { display: none; }
+  @media print {
+    body { background: #fff; }
+    .lang-bar, .page-header, .layout, footer, .toast { display: none !important; }
+    #print-area { display: block; padding: 1.5rem; }
+    #print-area h1 { font-size: 1.5rem; margin-bottom: 0.2rem; }
+    #print-area .sub { color: #555; font-size: 0.9rem; margin-bottom: 1.2rem; }
+    #print-area .pl { font-size: 0.95rem; padding: 0.18rem 0; }
+    #print-area .pl input { margin-right: 0.5rem; }
+    #print-area .recipes { margin-top: 1.5rem; font-size: 0.85rem; color: #555; }
+  }
+</style>
+</head>
+<body>
+
+<div class="lang-bar">
+  <span class="brand">🍲 <span id="brand-text">Wochenplan</span></span>
+  <button class="lang-btn" data-lang="de">DE</button>
+  <button class="lang-btn" data-lang="en">EN</button>
+  <button class="lang-btn" data-lang="es">ES</button>
+</div>
+
+<div class="page-header">
+  <h1 id="h-title">Wochenplan &amp; Einkaufsliste</h1>
+  <p id="h-sub">Rezepte auswählen, Portionen einstellen, Einkaufsliste exportieren.</p>
+</div>
+
+<div class="layout">
+  <section>
+    <div class="toolbar">
+      <input type="search" class="search" id="search" placeholder="Suchen…">
+      <button class="chip tag-toggle" id="tag-toggle" aria-expanded="false" aria-controls="tag-filters"></button>
+      <div class="toolbar-right">
+        <div class="default-serv" id="default-serv"></div>
+        <div class="view-toggle" id="view-toggle">
+          <button data-view="grid" title="Grid">▦</button>
+          <button data-view="list" title="List">☰</button>
+        </div>
+      </div>
+    </div>
+    <div id="tag-filters" class="tag-filters" hidden></div>
+    <div class="catalog" id="catalog"></div>
+    <p class="empty" id="load-error" style="display:none"></p>
+  </section>
+
+  <aside>
+    <div class="panel">
+      <h2 id="list-title">Einkaufsliste</h2>
+      <div class="count" id="list-count"></div>
+      <div id="list-body"></div>
+      <div class="export-row" id="export-row" style="display:none">
+        <button class="ex-btn" id="ex-copy">⧉ <span></span></button>
+        <button class="ex-btn" id="ex-txt">↓ <span></span></button>
+        <button class="ex-btn" id="ex-pdf">🖨 <span></span></button>
+        <button class="ex-btn" id="ex-rem"> <span></span></button>
+      </div>
+      <button class="clear-btn" id="clear-btn" style="display:none"></button>
+      <details class="help" id="rem-help" style="display:none">
+        <summary></summary>
+        <div id="rem-help-body"></div>
+        <input type="text" id="shortcut-name" placeholder="Add to Shopping List">
+        <figure class="help-figure" id="rem-help-figure">
+          <img src="docs/apple-reminders-shortcut.png" alt="Apple Shortcut: Add to Shopping List"
+               onerror="document.getElementById('rem-help-figure').style.display='none'">
+          <figcaption id="rem-help-caption"></figcaption>
+        </figure>
+      </details>
+    </div>
+  </aside>
+</div>
+
+<div id="print-area"></div>
+<div class="lightbox" id="lightbox"><img id="lightbox-img" alt=""></div>
+<div class="toast" id="toast"></div>
+<footer id="footer"></footer>
+
+<script>
+// ── i18n (UI chrome) ──────────────────────────────────────────────────
+const UI = {
+  de: {
+    brand: "Wochenplan", title: "Wochenplan & Einkaufsliste",
+    sub: "Rezepte auswählen, Portionen einstellen, Einkaufsliste exportieren.",
+    search: "Suchen…", listTitle: "Einkaufsliste",
+    countNone: "Noch keine Rezepte ausgewählt.",
+    count: n => `${n} ${n === 1 ? "Rezept" : "Rezepte"} ausgewählt`,
+    empty: "Wähle Rezepte aus dem Katalog, um deine Einkaufsliste zu erstellen.",
+    add: "Hinzufügen", added: "Ausgewählt ✓", servings: "Portionen", defaultServings: "Standard-Portionen",
+    favorites: "Favoriten", allRecipes: "Alle Rezepte", addFav: "Zu Favoriten hinzufügen", removeFav: "Aus Favoriten entfernen", tagsLabel: "Tags",
+    copy: "Kopieren", txt: "Text", pdf: "PDF", reminders: "Erinnerungen",
+    clear: "Alle entfernen",
+    pantryLabel: "Vorrat / nach Bedarf", recipesLabel: "Rezepte", selectedLabel: "Ausgewählte Rezepte",
+    copied: "In Zwischenablage kopiert", listHeading: "Einkaufsliste",
+    remHelpSummary: "Einrichtung für Apple Erinnerungen",
+    remHelpCaption: "Beispiel: der fertige Kurzbefehl „Add to Shopping List“.",
+    remHelp: [
+      "Öffne die App „Kurzbefehle“ auf iPhone/iPad/Mac.",
+      "Erstelle einen Kurzbefehl, der „Kurzbefehl-Eingabe“ als Text erhält.",
+      "Füge die Aktion „Text teilen“ (nach neuen Zeilen) hinzu.",
+      "Füge „Wiederholen mit jedem“ → „Neue Erinnerung“ hinzu.",
+      "Nenne den Kurzbefehl genau wie unten und tippe dann auf „Erinnerungen“."
+    ],
+    footer: "Standalone Meal Planner · Katalog aus catalog.json",
+    noShortcut: "Nur auf Apple-Geräten. Liste wurde in die Zwischenablage kopiert.",
+    copyFailed: "Kopieren fehlgeschlagen – bitte Liste manuell markieren.",
+    openingReminders: "Liste kopiert – Erinnerungen-Kurzbefehl wird geöffnet…",
+    loading: "Lade Rezepte…"
+  },
+  en: {
+    brand: "Meal Planner", title: "Weekly Plan & Shopping List",
+    sub: "Pick recipes, set servings, export your shopping list.",
+    search: "Search…", listTitle: "Shopping List",
+    countNone: "No recipes selected yet.",
+    count: n => `${n} ${n === 1 ? "recipe" : "recipes"} selected`,
+    empty: "Pick recipes from the catalog to build your shopping list.",
+    add: "Add", added: "Selected ✓", servings: "Servings", defaultServings: "Default servings",
+    favorites: "Favorites", allRecipes: "All recipes", addFav: "Add to favorites", removeFav: "Remove from favorites", tagsLabel: "Tags",
+    copy: "Copy", txt: "Text", pdf: "PDF", reminders: "Reminders",
+    clear: "Clear all",
+    pantryLabel: "Pantry / as needed", recipesLabel: "Recipes", selectedLabel: "Selected recipes",
+    copied: "Copied to clipboard", listHeading: "Shopping List",
+    remHelpSummary: "Set up Apple Reminders",
+    remHelpCaption: "Example: the finished “Add to Shopping List” shortcut.",
+    remHelp: [
+      "Open the Shortcuts app on iPhone/iPad/Mac.",
+      "Create a shortcut that receives “Shortcut Input” as Text.",
+      "Add the “Split Text” action (split by New Lines).",
+      "Add “Repeat with Each” → “Add New Reminder”.",
+      "Name the shortcut exactly as below, then tap “Reminders”."
+    ],
+    footer: "Standalone meal planner · catalog from catalog.json",
+    noShortcut: "Apple devices only. The list was copied to your clipboard instead.",
+    copyFailed: "Couldn’t copy automatically — please select the list manually.",
+    openingReminders: "List copied — opening your Reminders shortcut…",
+    loading: "Loading recipes…"
+  },
+  es: {
+    brand: "Planificador", title: "Plan Semanal y Lista de Compras",
+    sub: "Elige recetas, ajusta raciones y exporta tu lista de compras.",
+    search: "Buscar…", listTitle: "Lista de Compras",
+    countNone: "Aún no hay recetas seleccionadas.",
+    count: n => `${n} ${n === 1 ? "receta seleccionada" : "recetas seleccionadas"}`,
+    empty: "Elige recetas del catálogo para crear tu lista de compras.",
+    add: "Añadir", added: "Seleccionada ✓", servings: "Raciones", defaultServings: "Por defecto",
+    favorites: "Favoritos", allRecipes: "Todas las recetas", addFav: "Añadir a favoritos", removeFav: "Quitar de favoritos", tagsLabel: "Etiquetas",
+    copy: "Copiar", txt: "Texto", pdf: "PDF", reminders: "Recordatorios",
+    clear: "Quitar todo",
+    pantryLabel: "Despensa / al gusto", recipesLabel: "Recetas", selectedLabel: "Recetas seleccionadas",
+    copied: "Copiado al portapapeles", listHeading: "Lista de Compras",
+    remHelpSummary: "Configurar Recordatorios de Apple",
+    remHelpCaption: "Ejemplo: el atajo “Add to Shopping List” terminado.",
+    remHelp: [
+      "Abre la app Atajos en iPhone/iPad/Mac.",
+      "Crea un atajo que reciba la “Entrada del atajo” como Texto.",
+      "Añade la acción “Dividir texto” (por saltos de línea).",
+      "Añade “Repetir con cada uno” → “Añadir recordatorio”.",
+      "Nombra el atajo exactamente como abajo y pulsa “Recordatorios”."
+    ],
+    footer: "Planificador independiente · catálogo de catalog.json",
+    noShortcut: "Solo en dispositivos Apple. La lista se copió al portapapeles.",
+    copyFailed: "No se pudo copiar automáticamente — selecciona la lista manualmente.",
+    openingReminders: "Lista copiada — abriendo tu atajo de Recordatorios…",
+    loading: "Cargando recetas…"
+  }
+};
+
+// ── State ─────────────────────────────────────────────────────────────
+let RECIPES = [];                       // parsed recipe-data objects (+ __file)
+let lang = localStorage.getItem("mp_lang") || "de";
+let selection = JSON.parse(localStorage.getItem("mp_selection") || "{}"); // { id: servingsIndex }
+let provisional = {};                    // { id: servingsIndex } for unselected cards
+let search = "";
+let activeTag = null;
+let tagsOpen = localStorage.getItem("mp_tags_open") === "1";   // tag filters collapsed by default
+let view = localStorage.getItem("mp_view") || "grid";          // "grid" | "list"
+let defaultServings = +localStorage.getItem("mp_default") || null; // global default portions
+// Favorites are tracked per-browser in localStorage (a static page can't write catalog.json).
+// catalog.json may provide a `favorites` array as one-time seed defaults (see boot()).
+let favorites = new Set(JSON.parse(localStorage.getItem("mp_favorites") || "null") || []);
+
+// ── Helpers ───────────────────────────────────────────────────────────
+const $ = s => document.querySelector(s);
+const t = () => UI[lang];
+function L(obj) { return obj ? (obj[lang] ?? obj.en ?? obj.de ?? obj.es ?? "") : ""; }
+function save() {
+  localStorage.setItem("mp_lang", lang);
+  localStorage.setItem("mp_selection", JSON.stringify(selection));
+}
+function toast(msg) {
+  const el = $("#toast"); el.textContent = msg; el.classList.add("show");
+  clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("show"), 2600);
+}
+// Clipboard that also works on plain http:// (navigator.clipboard needs a secure context)
+function copyText(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
+  return new Promise((res, rej) => {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text; ta.setAttribute("readonly", "");
+      ta.style.position = "fixed"; ta.style.top = "-1000px"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      ok ? res() : rej(new Error("copy failed"));
+    } catch (e) { rej(e); }
+  });
+}
+function recipeById(id) { return RECIPES.find(r => r.id === id); }
+function servingsCount(r, idx) { return r.servings_options[idx] ?? r.servings_options[0]; }
+function unionServings() { return [...new Set(RECIPES.flatMap(r => r.servings_options || []))].sort((a, b) => a - b); }
+function closestIndex(r, target) {
+  const opts = r.servings_options || [r.base_servings || 1];
+  let best = 0, bd = Infinity;
+  opts.forEach((v, i) => { const d = Math.abs(v - target); if (d < bd) { bd = d; best = i; } });
+  return best;
+}
+function defaultIndex(r) { return closestIndex(r, defaultServings); }
+
+// Parse an amount string like "500 g", "½ Zweig", "1", "1 ½ EL" → {qty, unit}
+const UFRAC = { "½":0.5,"¼":0.25,"¾":0.75,"⅓":1/3,"⅔":2/3,"⅛":0.125,"⅜":0.375,"⅝":0.625,"⅞":0.875,"⅙":1/6,"⅚":5/6,"⅕":0.2,"⅖":0.4,"⅗":0.6,"⅘":0.8,"⅐":1/7,"⅑":1/9 };
+function parseAmount(str) {
+  const s = String(str || "").trim();
+  if (!s) return { qty: null, unit: "" };
+  // leading integer + optional fraction (unicode or a/b), then the rest is the unit
+  const m = s.match(/^(\d+(?:[.,]\d+)?)?\s*([½¼¾⅓⅔⅛⅜⅝⅞⅙⅚⅕⅖⅗⅘⅐⅑])?\s*(?:(\d+)\s*\/\s*(\d+))?\s*(.*)$/u);
+  if (!m) return { qty: null, unit: s };
+  let qty = 0, has = false;
+  if (m[1] != null) { qty += parseFloat(m[1].replace(",", ".")); has = true; }
+  if (m[2]) { qty += UFRAC[m[2]] || 0; has = true; }
+  if (m[3] && m[4]) { qty += parseInt(m[3], 10) / parseInt(m[4], 10); has = true; }
+  const unit = (m[5] || "").trim();
+  if (!has) return { qty: null, unit: s };   // no number found → keep whole string as label
+  return { qty, unit };
+}
+
+const FRACT = [[0.125,"⅛"],[0.166,"⅙"],[0.2,"⅕"],[0.25,"¼"],[0.333,"⅓"],[0.5,"½"],[0.666,"⅔"],[0.75,"¾"]];
+function fmtNum(n) {
+  if (n == null) return "";
+  const r = Math.round(n * 1000) / 1000;
+  const whole = Math.floor(r + 1e-9), frac = r - whole;
+  for (const [v, sym] of FRACT) if (Math.abs(frac - v) < 0.02) return (whole > 0 ? whole : "") + sym;
+  return String(Math.round(r * 100) / 100);
+}
+
+// Unit family for summing: mass(g), vol(ml), count, or the raw unit string
+function unitFamily(unit) {
+  const u = (unit || "").toLowerCase();
+  if (u === "g" || u === "gr" || u === "gramm") return { fam: "mass", factor: 1 };
+  if (u === "kg") return { fam: "mass", factor: 1000 };
+  if (u === "mg") return { fam: "mass", factor: 0.001 };
+  if (u === "ml") return { fam: "vol", factor: 1 };
+  if (u === "cl") return { fam: "vol", factor: 10 };
+  if (u === "l" || u === "liter") return { fam: "vol", factor: 1000 };
+  if (u === "") return { fam: "count", factor: 1 };
+  return { fam: "u:" + u, factor: 1 };
+}
+
+// ── Aggregation ───────────────────────────────────────────────────────
+// merge by ingredient id across recipes; sum compatible units.
+function buildList() {
+  const buckets = {};      // id -> { name, fams:{fam:{qty,unit}}, toTaste }
+  const pantry = new Map();
+  for (const [id, idx] of Object.entries(selection)) {
+    const r = recipeById(id); if (!r) continue;
+    for (const ing of r.ingredients) {
+      const { qty, unit } = parseAmount(ing.amounts ? ing.amounts[idx] : "");
+      const key = ing.id || L(ing).toLowerCase();
+      const b = buckets[key] || (buckets[key] = { name: L(ing), fams: {}, toTaste: false });
+      if (!b.name) b.name = L(ing);
+      if (qty == null) { if (unit) b.altLabel = unit; b.toTaste = true; continue; }
+      const { fam, factor } = unitFamily(unit);
+      const f = b.fams[fam] || (b.fams[fam] = { qty: 0, unit });
+      f.qty += qty * factor;
+    }
+    if (r.pantry && L(r.pantry)) L(r.pantry).split(/[,;]/).forEach(p => { const k = p.trim().toLowerCase(); if (k) pantry.set(k, p.trim()); });
+  }
+  const items = [];
+  for (const b of Object.values(buckets)) {
+    const parts = [];
+    for (const [fam, info] of Object.entries(b.fams)) {
+      if (fam === "mass")  parts.push(info.qty >= 1000 ? `${fmtNum(info.qty/1000)} kg` : `${fmtNum(info.qty)} g`);
+      else if (fam === "vol") parts.push(info.qty >= 1000 ? `${fmtNum(info.qty/1000)} l` : `${fmtNum(info.qty)} ml`);
+      else if (fam === "count") parts.push(`${fmtNum(info.qty)}`);
+      else parts.push(`${fmtNum(info.qty)} ${info.unit}`.trim());
+    }
+    const amount = parts.length ? parts.join(" + ") : (b.toTaste ? (b.altLabel || "") : "");
+    items.push({ name: b.name, amount, toTaste: !parts.length });
+  }
+  items.sort((a, b) => a.name.localeCompare(b.name, lang));
+  return { items, pantry: [...pantry.values()].sort((a, b) => a.localeCompare(b, lang)) };
+}
+
+function selectedRecipeLabels() {
+  return Object.entries(selection).map(([id, idx]) => {
+    const r = recipeById(id); return r ? `${L(r.title)} (${servingsCount(r, idx)})` : null;
+  }).filter(Boolean);
+}
+function selectedRecipesHtml() {
+  const items = Object.entries(selection).map(([id, idx]) => {
+    const r = recipeById(id); if (!r) return null;
+    const href = r.__file ? r.__file + (r.__file.includes("?") ? "&" : "?") + "lang=" + lang : null;
+    const title = href ? `<a href="${href}" target="_blank" rel="noopener">${L(r.title)}</a>` : L(r.title);
+    return `<li>${title}<span class="srv">(${servingsCount(r, idx)})</span></li>`;
+  }).filter(Boolean);
+  return `<div class="selected-recipes"><h4>${t().selectedLabel}</h4><ul>${items.join("")}</ul></div>`;
+}
+
+// ── Export text ───────────────────────────────────────────────────────
+function listAsText() {
+  const { items, pantry } = buildList();
+  const lines = [`${t().listHeading} — ${t().count(Object.keys(selection).length)}`, new Date().toLocaleDateString(lang), ""];
+  items.forEach(e => lines.push(`- ${e.amount ? e.amount + "  " : ""}${e.name}`));
+  if (pantry.length) { lines.push("", t().pantryLabel + ":", "- " + pantry.join(", ")); }
+  lines.push("", `${t().recipesLabel}: ${selectedRecipeLabels().join(", ")}`);
+  return lines.join("\n");
+}
+function listAsFlatItems() {
+  const { items, pantry } = buildList();
+  const out = items.map(e => `${e.amount ? e.amount + " " : ""}${e.name}`.trim());
+  pantry.forEach(p => out.push(p));
+  return out;
+}
+
+// ── Renderers ─────────────────────────────────────────────────────────
+function renderChrome() {
+  document.documentElement.lang = lang;
+  $("#brand-text").textContent = t().brand;
+  $("#h-title").textContent = t().title;
+  $("#h-sub").textContent = t().sub;
+  $("#search").placeholder = t().search;
+  $("#list-title").textContent = t().listTitle;
+  $("#clear-btn").textContent = t().clear;
+  $("#footer").textContent = t().footer;
+  $("#ex-copy").querySelector("span").textContent = t().copy;
+  $("#ex-txt").querySelector("span").textContent = t().txt;
+  $("#ex-pdf").querySelector("span").textContent = t().pdf;
+  $("#ex-rem").querySelector("span").textContent = t().reminders;
+  $("#rem-help summary").textContent = t().remHelpSummary;
+  $("#rem-help-body").innerHTML = "<ol>" + t().remHelp.map(s => `<li>${s}</li>`).join("") + "</ol>";
+  $("#rem-help-caption").textContent = t().remHelpCaption;
+  document.querySelectorAll(".lang-btn").forEach(b => b.classList.toggle("active", b.dataset.lang === lang));
+}
+function clockIcon() {
+  return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+}
+function updateTagToggle() {
+  const btn = $("#tag-toggle");
+  btn.innerHTML = `${tagsOpen ? "▾" : "▸"} ${t().tagsLabel}${activeTag ? ` · <b>${activeTag}</b>` : ""}`;
+  btn.setAttribute("aria-expanded", tagsOpen);
+  btn.classList.toggle("active", !!activeTag);
+  $("#tag-filters").hidden = !tagsOpen;
+}
+function renderFilters() {
+  const tags = [...new Set(RECIPES.flatMap(r => r.tags || []))].sort();
+  const wrap = $("#tag-filters");
+  wrap.innerHTML = tags.map(tag => `<button class="chip${activeTag === tag ? " active" : ""}" data-tag="${tag}">${tag}</button>`).join("");
+  wrap.querySelectorAll(".chip").forEach(c => c.onclick = () => {
+    activeTag = activeTag === c.dataset.tag ? null : c.dataset.tag; renderFilters(); renderCatalog();
+  });
+  updateTagToggle();
+}
+function makeCard(r) {
+  const selected = r.id in selection;
+  const fav = favorites.has(r.id);
+  const idx = selection[r.id] ?? provisional[r.id] ?? defaultIndex(r);
+  const card = document.createElement("div");
+  card.className = "card" + (selected ? " selected" : "");
+  const href = r.__file + (r.__file.includes("?") ? "&" : "?") + "lang=" + lang;
+  const titleHtml = r.__file ? `<a href="${href}" target="_blank" rel="noopener">${L(r.title)}</a>` : L(r.title);
+  const meta = [];
+  if (r.time_min) meta.push(`<span class="meta-tag">${clockIcon()} ${r.time_min}${r.time_max && r.time_max !== r.time_min ? "–" + r.time_max : ""} min</span>`);
+  if (r.kcal_per_serving) meta.push(`<span class="meta-tag">${r.kcal_per_serving} kcal</span>`);
+  (r.tags || []).slice(0, 2).forEach(tag => meta.push(`<span class="meta-tag">${tag}</span>`));
+  const thumb = r.images && r.images.main ? `<img class="thumb" src="${r.images.main}" alt="" loading="lazy" decoding="async">` : "";
+  const pills = (r.servings_options || []).map((n, i) =>
+    `<button class="serving-btn${i === idx ? " active" : ""}" data-idx="${i}">${n}</button>`).join("");
+  card.innerHTML = `
+    <button class="fav-btn${fav ? " on" : ""}" title="${fav ? t().removeFav : t().addFav}" aria-pressed="${fav}">${fav ? "★" : "☆"}</button>
+    ${thumb}
+    <div class="body">
+      <div class="info">
+        <h3>${titleHtml}</h3>
+        <div class="subtitle">${L(r.subtitle)}</div>
+        <div class="card-meta">${meta.join("")}</div>
+      </div>
+      <div class="card-foot">
+        <div class="servings-row"><label>${t().servings}</label>${pills}</div>
+        <button class="add-btn">${selected ? t().added : t().add}</button>
+      </div>
+    </div>`;
+  card.querySelector(".fav-btn").onclick = () => toggleFavorite(r.id);
+  card.querySelectorAll(".serving-btn").forEach(btn => btn.onclick = () => setServings(r.id, +btn.dataset.idx));
+  card.querySelector(".add-btn").onclick = () => toggleSelect(r.id);
+  return card;
+}
+function renderCatalog() {
+  const q = search.trim().toLowerCase();
+  const cat = $("#catalog");
+  cat.className = "catalog" + (view === "list" ? " list" : "");
+  const list = RECIPES.filter(r => {
+    if (activeTag && !(r.tags || []).includes(activeTag)) return false;
+    if (!q) return true;
+    return [L(r.title), L(r.subtitle), (r.tags || []).join(" ")].join(" ").toLowerCase().includes(q);
+  });
+  const favs = list.filter(r => favorites.has(r.id));
+  const others = list.filter(r => !favorites.has(r.id));
+  cat.innerHTML = "";
+  const head = txt => { const h = document.createElement("div"); h.className = "group-head"; h.innerHTML = txt; cat.appendChild(h); };
+  if (favs.length) {
+    head(`<span class="star">★</span> ${t().favorites}`);
+    favs.forEach(r => cat.appendChild(makeCard(r)));
+    if (others.length) head(t().allRecipes);
+  }
+  others.forEach(r => cat.appendChild(makeCard(r)));
+}
+function toggleFavorite(id) {
+  if (favorites.has(id)) favorites.delete(id); else favorites.add(id);
+  localStorage.setItem("mp_favorites", JSON.stringify([...favorites]));
+  renderCatalog();
+}
+function setServings(id, idx) {
+  if (id in selection) { selection[id] = idx; save(); renderList(); }
+  else provisional[id] = idx;
+  renderCatalog();
+}
+function toggleSelect(id) {
+  if (id in selection) { provisional[id] = selection[id]; delete selection[id]; }
+  else { selection[id] = provisional[id] ?? defaultIndex(recipeById(id)); delete provisional[id]; }
+  save(); renderCatalog(); renderList();
+}
+function changeDefault(n) {
+  defaultServings = n;
+  localStorage.setItem("mp_default", n);
+  provisional = {};                                  // unselected cards follow the new default
+  for (const id of Object.keys(selection)) {         // re-snap everything already chosen
+    const r = recipeById(id); if (r) selection[id] = closestIndex(r, n);
+  }
+  save(); renderAll();
+}
+function setView(v) { view = v; localStorage.setItem("mp_view", v); renderControls(); renderCatalog(); }
+function renderControls() {
+  const opts = unionServings();
+  const ds = $("#default-serv");
+  ds.innerHTML = `<label>${t().defaultServings}</label>` +
+    opts.map(n => `<button class="serving-btn${n === defaultServings ? " active" : ""}" data-n="${n}">${n}</button>`).join("");
+  ds.querySelectorAll("button").forEach(b => b.onclick = () => changeDefault(+b.dataset.n));
+  document.querySelectorAll("#view-toggle button").forEach(b => {
+    b.classList.toggle("active", b.dataset.view === view);
+    b.onclick = () => setView(b.dataset.view);
+  });
+}
+function renderList() {
+  const ids = Object.keys(selection);
+  const body = $("#list-body");
+  $("#list-count").textContent = ids.length ? t().count(ids.length) : t().countNone;
+  if (!ids.length) {
+    body.innerHTML = `<p class="empty">${t().empty}</p>`;
+    $("#export-row").style.display = "none"; $("#clear-btn").style.display = "none"; $("#rem-help").style.display = "none";
+    return;
+  }
+  const { items, pantry } = buildList();
+  let html = selectedRecipesHtml();
+  items.forEach(e => {
+    html += `<div class="ing-line${e.toTaste ? " totaste" : ""}"><span class="amt">${e.amount}</span><span class="nm">${e.name}</span></div>`;
+  });
+  if (pantry.length) html += `<div class="pantry-block"><h4>${t().pantryLabel}</h4><div class="pantry-line">${pantry.join(" · ")}</div></div>`;
+  body.innerHTML = html;
+  $("#export-row").style.display = "flex"; $("#clear-btn").style.display = "block"; $("#rem-help").style.display = "block";
+}
+function renderAll() { renderChrome(); renderControls(); renderFilters(); renderCatalog(); renderList(); }
+
+// ── Exports ───────────────────────────────────────────────────────────
+function exportCopy() { copyText(listAsText()).then(() => toast(t().copied), () => toast(t().copyFailed)); }
+function exportTxt() {
+  const blob = new Blob([listAsText()], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob), a = document.createElement("a");
+  a.href = url; a.download = `shopping-list-${new Date().toISOString().slice(0, 10)}.txt`; a.click();
+  URL.revokeObjectURL(url);
+}
+function exportPdf() {
+  const { items, pantry } = buildList();
+  let html = `<h1>${t().listHeading}</h1><div class="sub">${t().count(Object.keys(selection).length)} · ${new Date().toLocaleDateString(lang)}</div>`;
+  items.forEach(e => html += `<div class="pl"><input type="checkbox"> ${e.amount ? "<b>" + e.amount + "</b> " : ""}${e.name}</div>`);
+  if (pantry.length) html += `<div class="pl" style="margin-top:.8rem"><b>${t().pantryLabel}:</b> ${pantry.join(", ")}</div>`;
+  html += `<div class="recipes">${t().recipesLabel}: ${selectedRecipeLabels().join(", ")}</div>`;
+  $("#print-area").innerHTML = html; window.print();
+}
+function exportReminders() {
+  const name = ($("#shortcut-name").value || "Add to Shopping List").trim();
+  const text = listAsFlatItems().join("\n");
+  copyText(text).catch(() => {});                       // list is always on the clipboard as a fallback
+  const isApple = /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent);
+  if (!isApple) { toast(t().noShortcut); return; }
+  toast(t().openingReminders);                          // feedback even when it works
+  // First time: reveal the one-time setup steps in case the shortcut isn't installed yet.
+  if (!localStorage.getItem("mp_rem_seen")) { $("#rem-help").open = true; localStorage.setItem("mp_rem_seen", "1"); }
+  window.location.href = `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(name)}&input=text&text=${encodeURIComponent(text)}`;
+}
+
+// ── Load catalog + recipes ────────────────────────────────────────────
+async function loadRecipe(file) {
+  // Prefer a data-only sibling JSON (foo.json) for speed; fall back to parsing the HTML.
+  const jsonFile = file.replace(/\.html?$/i, ".json");
+  if (jsonFile !== file) {
+    try {
+      const jr = await fetch(jsonFile);
+      if (jr.ok) { const data = await jr.json(); data.__file = file; return data; }
+    } catch (e) {}
+  }
+  const res = await fetch(file);
+  if (!res.ok) throw new Error(`${file}: ${res.status}`);
+  const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+  const node = doc.getElementById("recipe-data");
+  if (!node) throw new Error(`${file}: no #recipe-data block`);
+  const data = JSON.parse(node.textContent);
+  data.__file = file;
+  return data;
+}
+
+function wire() {
+  document.querySelectorAll(".lang-btn").forEach(b => b.onclick = () => { lang = b.dataset.lang; save(); renderAll(); });
+  $("#search").oninput = e => { search = e.target.value; renderCatalog(); };
+  $("#tag-toggle").onclick = () => { tagsOpen = !tagsOpen; localStorage.setItem("mp_tags_open", tagsOpen ? "1" : "0"); updateTagToggle(); };
+  // Click the setup screenshot to view it full size
+  const lb = $("#lightbox"), figImg = $("#rem-help-figure img");
+  if (figImg) figImg.onclick = () => { $("#lightbox-img").src = figImg.src; lb.classList.add("open"); };
+  lb.onclick = () => lb.classList.remove("open");
+  document.addEventListener("keydown", e => { if (e.key === "Escape") lb.classList.remove("open"); });
+  $("#clear-btn").onclick = () => { selection = {}; save(); renderCatalog(); renderList(); };
+  $("#ex-copy").onclick = exportCopy;
+  $("#ex-txt").onclick = exportTxt;
+  $("#ex-pdf").onclick = exportPdf;
+  $("#ex-rem").onclick = exportReminders;
+  const saved = localStorage.getItem("mp_shortcut");
+  if (saved) $("#shortcut-name").value = saved;
+  $("#shortcut-name").oninput = e => localStorage.setItem("mp_shortcut", e.target.value);
+}
+
+(async function boot() {
+  wire(); renderChrome();
+  $("#catalog").innerHTML = `<p class="empty">${t().loading}</p>`;
+  let files, catFavorites = null;
+  try {
+    const cat = await fetch("catalog.json").then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+    files = cat.recipes || [];
+    if (Array.isArray(cat.favorites)) catFavorites = cat.favorites;
+  } catch (err) {
+    $("#catalog").innerHTML = "";
+    $("#load-error").style.display = "block";
+    $("#load-error").textContent =
+      "Could not load catalog.json (" + err.message + "). Serve this folder over HTTP — e.g. run `python3 -m http.server` here and open http://localhost:8000/ — opening via file:// blocks loading.";
+    return;
+  }
+  const results = await Promise.allSettled(files.map(loadRecipe));
+  RECIPES = results.filter(r => r.status === "fulfilled").map(r => r.value);
+  const failed = results.filter(r => r.status === "rejected").map(r => r.reason.message);
+  // pick a sensible global default if none stored yet
+  if (!defaultServings) { const u = unionServings(); defaultServings = u.includes(2) ? 2 : (u[0] || 2); }
+  // seed favorites from catalog.json the first time (before the user has toggled any)
+  if (localStorage.getItem("mp_favorites") === null && catFavorites) {
+    favorites = new Set(catFavorites);
+    localStorage.setItem("mp_favorites", JSON.stringify([...favorites]));
+  }
+  // drop selections / favorites that no longer exist in the catalog
+  for (const id of Object.keys(selection)) if (!recipeById(id)) delete selection[id];
+  for (const id of [...favorites]) if (!recipeById(id)) favorites.delete(id);
+  $("#catalog").innerHTML = "";
+  renderAll();
+  if (failed.length) { $("#load-error").style.display = "block"; $("#load-error").textContent = "Some recipes failed to load: " + failed.join("; "); }
+})();
+</script>
+</body>
+</html>
