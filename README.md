@@ -92,4 +92,15 @@ Click the ★ on a recipe to mark it a favorite; favorites are grouped at the to
 catalog. Toggling is stored per-browser (a static page can't write back to the server),
 so it follows the device. To ship default favorites, list recipe ids in the optional
 `favorites` array in `catalog.json` — those apply only on a browser's first visit, before
+so it follows the device.
+
+To ship default favorites so new visitors see them pre-selected, click the
+**↓ Export** button in the Favorites heading to download a `favorites.json`, then run:
+
+```bash
+python3 tools/set-favorites.py favorites.json
+```
+
+This updates the `favorites` array in `catalog.json`. Pass `--dry-run` to preview
+changes without writing. The defaults apply only on a browser's first visit, before
 any star is clicked.
