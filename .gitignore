@@ -1,3 +1,5 @@
 .obsidian/workspace
 .venv/
 __pycache__/
+catalog.json
+recipes/
