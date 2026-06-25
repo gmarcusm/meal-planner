@@ -90,8 +90,6 @@ artifacts derived from the HTML.
 
 Click the ★ on a recipe to mark it a favorite; favorites are grouped at the top of the
 catalog. Toggling is stored per-browser (a static page can't write back to the server),
-so it follows the device. To ship default favorites, list recipe ids in the optional
-`favorites` array in `catalog.json` — those apply only on a browser's first visit, before
 so it follows the device.
 
 To ship default favorites so new visitors see them pre-selected, click the

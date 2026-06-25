@@ -660,15 +660,20 @@ function renderCatalog() {
     if (!q) return true;
     return [L(r.title), L(r.subtitle), (r.tags || []).join(" ")].join(" ").toLowerCase().includes(q);
   });
-  const favs = list.filter(r => favorites.has(r.id));
-  const others = list.filter(r => !favorites.has(r.id));
+  const sel = list.filter(r => r.id in selection);
+  const favs = list.filter(r => favorites.has(r.id) && !(r.id in selection));
+  const others = list.filter(r => !favorites.has(r.id) && !(r.id in selection));
   cat.innerHTML = "";
   const head = txt => { const h = document.createElement("div"); h.className = "group-head"; h.innerHTML = txt; cat.appendChild(h); };
+  if (sel.length) {
+    head(`✓ ${t().selectedLabel}`);
+    sel.forEach(r => cat.appendChild(makeCard(r)));
+  }
   if (favs.length) {
     head(`<span class="star">★</span> ${t().favorites}<button class="export-fav" onclick="exportFavorites()">↓ ${t().exportFav}</button>`);
     favs.forEach(r => cat.appendChild(makeCard(r)));
-    if (others.length) head(t().allRecipes);
   }
+  if (others.length && (sel.length || favs.length)) head(t().allRecipes);
   others.forEach(r => cat.appendChild(makeCard(r)));
 }
 function toggleFavorite(id) {
